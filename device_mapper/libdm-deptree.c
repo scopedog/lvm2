@@ -2325,6 +2325,8 @@ static int _emit_areas_line(struct dm_task *dmt __attribute__((unused)),
 		case SEG_RAID6_RS_6:
 		case SEG_RAID6_LA_6:
 		case SEG_RAID6_RA_6:
+		case SEG_RAIDKM:
+		case SEG_RAIDKM_N:
 			if (!area->dev_node) {
 				EMIT_PARAMS(*pos, " -");
 				break;
@@ -3137,6 +3139,8 @@ static int _emit_segment_line(struct dm_task *dmt, uint32_t major,
 	case SEG_RAID6_RS_6:
 	case SEG_RAID6_LA_6:
 	case SEG_RAID6_RA_6:
+	case SEG_RAIDKM:
+	case SEG_RAIDKM_N:
 		target_type_is_raid = 1;
 		if (!_raid_emit_segment_line(dmt, major, minor, seg, seg_start,
 					     params, paramsize))

@@ -1426,7 +1426,8 @@ static uint32_t _calc_area_multiple(const struct segment_type *segtype,
 static int _lv_segment_reduce(struct lv_segment *seg, uint32_t reduction)
 {
 	uint32_t area_reduction, s;
-	uint32_t areas = (seg->area_count / (seg_is_raid10(seg) ? seg->data_copies : 1)) - seg->segtype->parity_devs;
+	uint32_t areas = (seg->area_count / (seg_is_raid10(seg) ? seg->data_copies : 1)) -
+		(seg_is_any_raidkm(seg) ? seg->parity_count : seg->segtype->parity_devs);
 
 	/* Caller must ensure exact divisibility */
 	if (seg_is_striped(seg) || seg_is_striped_raid(seg)) {

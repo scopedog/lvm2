@@ -522,6 +522,11 @@ static int _read_mirror_params(struct cmd_context *cmd,
 static int _read_raid_params(struct cmd_context *cmd,
 			     struct lvcreate_params *lp)
 {
+	if (arg_is_set(cmd, paritycount_ARG) && !seg_is_any_raidkm(lp)) {
+		log_error("--paritycount is only valid with --type raidkm or raidkm_n.");
+		return 0;
+	}
+
 	if (seg_is_mirrored(lp)) {
 		if (segtype_is_raid10(lp->segtype)) {
 			if (lp->stripes < 2) {
@@ -554,6 +559,19 @@ static int _read_raid_params(struct cmd_context *cmd,
 			return 0;
 		}
 
+	} else if (seg_is_any_raidkm(lp)) {
+		/* raidkm (md level 71): -i = k data stripes, --paritycount = m */
+		lp->parity_count = arg_uint_value(cmd, paritycount_ARG, 0);
+		if (lp->parity_count < 2 || lp->parity_count > 8) {
+			log_error("raidkm requires --paritycount in the range 2 to 8.");
+			return 0;
+		}
+		if (!lp->stripes_supplied)
+			lp->stripes = 2;	/* default k data disks */
+		if (lp->stripes < 1) {
+			log_error("raidkm requires at least 1 data stripe (-i).");
+			return 0;
+		}
 	} else if (seg_is_any_raid6(lp) && lp->stripes < 3) {
 		if (lp->stripes_supplied) {
 			log_error("Minimum of 3 stripes required for %s.", lp->segtype->name);
@@ -942,7 +960,8 @@ static int _lvcreate_params(struct cmd_context *cmd,
 	raidintegrity_ARG, \
 	raidintegritymode_ARG, \
 	raidintegrityblocksize_ARG, \
-	integritysettings_ARG
+	integritysettings_ARG, \
+	paritycount_ARG
 
 #define SIZE_ARGS \
 	extents_ARG,\

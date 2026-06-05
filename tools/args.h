@@ -1351,6 +1351,10 @@ arg(interval_ARG, 'i', "interval", number_VAL, 0, 0,
 /* Not used */
 arg(iop_version_ARG, 'i', "iop_version", 0, 0, 0, NULL)
 
+arg(paritycount_ARG, '\0', "paritycount", number_VAL, 0, 0,
+    "Specifies the parity count m for a raidkm (md level 71) LV, i.e. the number\n"
+    "of erasure-coding parity units. The array tolerates m simultaneous device\n"
+    "failures. Valid range is 2 to 8. Only valid with --type raidkm or raidkm_n.\n")
 arg(stripes_ARG, 'i', "stripes", number_VAL, 0, 0,
     "Specifies the number of stripes in a striped LV. This is the number of\n"
     "PVs (devices) that a striped LV is spread across. Data that\n"

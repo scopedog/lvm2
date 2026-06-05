@@ -876,7 +876,8 @@ OO_LVCREATE_VDO: --compression Bool, --deduplication Bool, --vdosettings String
 OO_LVCREATE_THINPOOL: --discards Discards, --errorwhenfull Bool, --pooldatavdo Bool, OO_LVCREATE_VDO, OO_LVCREATE_POOL
 
 OO_LVCREATE_RAID: --regionsize RegionSize, --minrecoveryrate SizeKB, --maxrecoveryrate SizeKB,
---raidintegrity Bool, --raidintegritymode String, --raidintegrityblocksize Number, --integritysettings String
+--raidintegrity Bool, --raidintegritymode String, --raidintegrityblocksize Number, --integritysettings String,
+--paritycount Number
 
 ---
 

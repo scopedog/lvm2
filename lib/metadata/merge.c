@@ -345,7 +345,8 @@ static void _check_raid_seg(struct lv_segment *seg, int *error_count)
 	else if (seg_is_raid4(seg) ||
 		 seg_is_any_raid5(seg) ||
 		 seg_is_any_raid6(seg) ||
-		 seg_is_raid10(seg))
+		 seg_is_raid10(seg) ||
+		 seg_is_any_raidkm(seg))
 		_check_raid45610_seg(seg, error_count);
 	else
 		raid_seg_error("bogus RAID segment type");
