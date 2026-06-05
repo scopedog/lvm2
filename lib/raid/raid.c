@@ -138,6 +138,7 @@ static int _raid_text_import(struct lv_segment *seg,
 		{ "region_size",	&seg->region_size },
 		{ "stripe_size",	&seg->stripe_size },
 		{ "data_copies",	&seg->data_copies },
+		{ "parity_count",	&seg->parity_count },
 		{ "writebehind",	&seg->writebehind },
 		{ "min_recovery_rate",	&seg->min_recovery_rate },
 		{ "max_recovery_rate",	&seg->max_recovery_rate },
@@ -206,6 +207,8 @@ static int _raid_text_export_raid(const struct lv_segment *seg, struct formatter
 		outf(f, "device_count = %u", seg->area_count);
 		if (seg_is_any_raid10(seg) && seg->data_copies > 0)
 			outf(f, "data_copies = %" PRIu32, seg->data_copies);
+		if (seg_is_any_raidkm(seg) && seg->parity_count > 0)
+			outf(f, "parity_count = %" PRIu32, seg->parity_count);
 		if (seg->region_size)
 			outf(f, "region_size = %" PRIu32, seg->region_size);
 	}
@@ -388,7 +391,12 @@ static int _raid_add_target_line(struct dev_manager *dm __attribute__((unused)),
 
 	params.raid_type = lvseg_name(seg);
 
-	if (seg->segtype->parity_devs) {
+	if (seg_is_any_raidkm(seg)) {
+		/* raidkm (md level 71): m parity carried in seg->parity_count */
+		params.mirrors = 1;
+		params.stripes = seg->area_count - seg->parity_count;
+		params.parity_count = seg->parity_count;
+	} else if (seg->segtype->parity_devs) {
 		/* RAID 4/5/6 */
 		params.mirrors = 1;
 		params.stripes = seg->area_count - seg->segtype->parity_devs;
@@ -661,7 +669,11 @@ static const struct raid_type {
 	{ SEG_TYPE_NAME_RAID6_LS_6, 2, SEG_RAID6_LS_6 },
 	{ SEG_TYPE_NAME_RAID6_RS_6, 2, SEG_RAID6_RS_6 },
 	{ SEG_TYPE_NAME_RAID6_LA_6, 2, SEG_RAID6_LA_6 },
-	{ SEG_TYPE_NAME_RAID6_RA_6, 2, SEG_RAID6_RA_6 }
+	{ SEG_TYPE_NAME_RAID6_RA_6, 2, SEG_RAID6_RA_6 },
+	/* raidkm (md level 71): parity_devs is 0 here because m is variable and
+	 * carried per-LV in seg->parity_count (see seg_parity_devs()). */
+	{ SEG_TYPE_NAME_RAIDKM,     0, SEG_RAIDKM },
+	{ SEG_TYPE_NAME_RAIDKM_N,   0, SEG_RAIDKM_N }
 };
 
 static struct segment_type *_init_raid_segtype(struct cmd_context *cmd,

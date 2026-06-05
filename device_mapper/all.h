@@ -919,6 +919,7 @@ struct dm_tree_node_raid_params_v2 {
 	uint32_t max_recovery_rate; /* kB/sec/disk */
 	uint32_t min_recovery_rate; /* kB/sec/disk */
 	uint32_t stripe_cache;      /* sectors */
+	uint32_t parity_count;      /* raidkm (md level 71): parity count m */
 
 	uint64_t flags;             /* [no]sync */
 };

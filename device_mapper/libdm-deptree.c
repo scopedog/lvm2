@@ -60,6 +60,8 @@ enum {
 	SEG_RAID6_RS_6,
 	SEG_RAID6_LA_6,
 	SEG_RAID6_RA_6,
+	SEG_RAIDKM,
+	SEG_RAIDKM_N,
 };
 
 /* FIXME Add crypt and multipath support */
@@ -101,6 +103,8 @@ static const struct {
 	{ SEG_RAID6_RS_6, "raid6_rs_6"},
 	{ SEG_RAID6_LA_6, "raid6_la_6"},
 	{ SEG_RAID6_RA_6, "raid6_ra_6"},
+	{ SEG_RAIDKM, "raidkm"},
+	{ SEG_RAIDKM_N, "raidkm_n"},
 
 
 	/*
@@ -193,6 +197,7 @@ struct load_segment {
 	uint32_t max_recovery_rate;	/* raid kB/sec/disk */
 	uint32_t min_recovery_rate;	/* raid kB/sec/disk */
 	uint32_t data_copies;		/* raid10 data_copies */
+	uint32_t parity_count;		/* raidkm (md level 71) parity count m */
 
 	uint64_t metadata_start;	/* Cache */
 	uint64_t metadata_len;		/* Cache */
@@ -2548,7 +2553,8 @@ static int _raid_emit_segment_line(struct dm_task *dmt, uint32_t major,
 		       _2_if_value(seg->writebehind) +
 		       _2_if_value(seg->min_recovery_rate) +
 		       _2_if_value(seg->max_recovery_rate) +
-		       _2_if_value(seg->data_copies > 1);
+		       _2_if_value(seg->data_copies > 1) +
+		       _2_if_value(seg->parity_count);
 
 	/* rebuilds and writemostly are BITMAP_SIZE * 64 bits */
 	param_count += _get_params_count(seg->rebuilds);
@@ -2604,6 +2610,10 @@ static int _raid_emit_segment_line(struct dm_task *dmt, uint32_t major,
 		if (seg->data_copies > 1 && type == SEG_RAID10)
 			EMIT_PARAMS(pos, " raid10_copies %u", seg->data_copies);
 
+		/* raidkm (md level 71): parity count m */
+		if (seg->parity_count)
+			EMIT_PARAMS(pos, " parity_count %u", seg->parity_count);
+
 		if (seg->delta_disks)
 			EMIT_PARAMS(pos, " delta_disks %d", seg->delta_disks);
 
@@ -2623,6 +2633,10 @@ static int _raid_emit_segment_line(struct dm_task *dmt, uint32_t major,
 
 		if (seg->region_size)
 			EMIT_PARAMS(pos, " region_size %u", seg->region_size);
+
+		/* raidkm (md level 71): parity count m */
+		if (seg->parity_count)
+			EMIT_PARAMS(pos, " parity_count %u", seg->parity_count);
 
 		/* If seg-data_offset == 1, kernel needs a zero offset to adjust to it */
 		if (seg->data_offset)
@@ -3848,6 +3862,7 @@ int dm_tree_node_add_raid_target_with_params_v2(struct dm_tree_node *node,
 	memcpy(seg->writemostly, p->writemostly, sizeof(seg->writemostly));
 	seg->writebehind = p->writebehind;
 	seg->data_copies = p->data_copies;
+	seg->parity_count = p->parity_count;
 	seg->min_recovery_rate = p->min_recovery_rate;
 	seg->max_recovery_rate = p->max_recovery_rate;
 	seg->flags = p->flags;

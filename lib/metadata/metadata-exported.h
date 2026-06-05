@@ -508,6 +508,7 @@ struct lv_segment {
 	struct dm_list origin_list;
 	uint32_t region_size;	/* For raids/mirrors - in sectors */
 	uint32_t data_copies;	/* For RAID: number of data copies (e.g. 3 for RAID 6 */
+	uint32_t parity_count;	/* For raidkm (md level 71): parity count m (2..8) */
 	uint32_t extents_copied;/* Number of extents synced for raids/mirrors */
 	struct logical_volume *log_lv;
 	struct lv_segment *pvmove_source_seg;
@@ -1029,6 +1030,7 @@ struct lvcreate_params {
 	unsigned stripe_size_supplied; /* striped/RAID */
 
 	uint32_t mirrors; /* mirror/RAID */
+	uint32_t parity_count; /* raidkm: parity count m (2..8) */
 
 	uint32_t min_recovery_rate; /* RAID */
 	uint32_t max_recovery_rate; /* RAID */

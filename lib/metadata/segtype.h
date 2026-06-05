@@ -73,6 +73,8 @@ struct dev_manager;
 #define SEG_LINEAR_TARGET	(1ULL << 40)
 #define SEG_VDO			(1ULL << 41)
 #define SEG_VDO_POOL		(1ULL << 42)
+#define SEG_RAIDKM		(1ULL << 43)	/* raidkm (md level 71) rotating parity */
+#define SEG_RAIDKM_N		(1ULL << 44)	/* raidkm dedicated (parity-last) */
 
 #define SEG_UNKNOWN		(1ULL << 63)
 
@@ -113,6 +115,8 @@ struct dev_manager;
 #define SEG_TYPE_NAME_RAID6_RA_6	"raid6_ra_6"
 #define SEG_TYPE_NAME_RAID6_RS_6	"raid6_rs_6"
 #define SEG_TYPE_NAME_RAID6_N_6		"raid6_n_6"
+#define SEG_TYPE_NAME_RAIDKM		"raidkm"
+#define SEG_TYPE_NAME_RAIDKM_N		"raidkm_n"
 
 #define segtype_is_linear(segtype)	(!strcmp((segtype)->name, SEG_TYPE_NAME_LINEAR))
 #define segtype_is_error(segtype)	(!strcmp((segtype)->name, SEG_TYPE_NAME_ERROR))
@@ -149,6 +153,9 @@ struct dev_manager;
 #define segtype_is_raid6_rs_6(segtype)	((segtype)->flags & SEG_RAID6_RS_6 ? 1 : 0)
 #define segtype_is_raid6_la_6(segtype)	((segtype)->flags & SEG_RAID6_LA_6 ? 1 : 0)
 #define segtype_is_raid6_ra_6(segtype)	((segtype)->flags & SEG_RAID6_RA_6 ? 1 : 0)
+#define segtype_is_raidkm(segtype)	((segtype)->flags & SEG_RAIDKM ? 1 : 0)
+#define segtype_is_raidkm_n(segtype)	((segtype)->flags & SEG_RAIDKM_N ? 1 : 0)
+#define segtype_is_any_raidkm(segtype)	((segtype)->flags & (SEG_RAIDKM | SEG_RAIDKM_N) ? 1 : 0)
 #define segtype_is_raid10(segtype)	((segtype)->flags & SEG_RAID10 ? 1 : 0)
 #define segtype_is_raid10_near(segtype)	((segtype)->flags & SEG_RAID10_NEAR ? 1 : 0)
 /* FIXME: once raid10_{far,offset} supported */
@@ -207,6 +214,9 @@ struct dev_manager;
 #define seg_is_raid6_nr(seg)	segtype_is_raid6_nr((seg)->segtype)
 #define seg_is_raid6_nc(seg)	segtype_is_raid6_nc((seg)->segtype)
 #define seg_is_raid6_n_6(seg)	segtype_is_raid6_n_6((seg)->segtype)
+#define seg_is_raidkm(seg)	segtype_is_raidkm((seg)->segtype)
+#define seg_is_raidkm_n(seg)	segtype_is_raidkm_n((seg)->segtype)
+#define seg_is_any_raidkm(seg)	segtype_is_any_raidkm((seg)->segtype)
 #define seg_is_any_raid10(seg)	segtype_is_any_raid10((seg)->segtype)
 #define seg_is_raid10(seg)	segtype_is_raid10((seg)->segtype)
 #define seg_is_raid10_near(seg)	segtype_is_raid10_near((seg)->segtype)
