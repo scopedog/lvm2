@@ -3643,9 +3643,12 @@ static struct alloc_handle *_alloc_init(struct cmd_context *cmd,
 	 * exists and they only want replacement drives.
 	 */
 	/* raidkm (md level 71): parity count m is variable, passed in explicitly
-	 * (segtype->parity_devs is 0); otherwise use the per-segtype constant. */
+	 * (segtype->parity_devs is 0).  Unlike raid4/5/6 (where data stripes always
+	 * exceed the parity device count), raidkm permits k <= m (e.g. k=4,m=4), so
+	 * the raid6 "area_count <= parity => replacement alloc" heuristic must not be
+	 * applied here — a raidkm create always reserves m parity images. */
 	if (segtype_is_any_raidkm(segtype))
-		parity_count = (area_count <= raidkm_parity) ? 0 : raidkm_parity;
+		parity_count = raidkm_parity;
 	else
 		parity_count = (area_count <= segtype->parity_devs) ? 0 : segtype->parity_devs;
 	alloc_count = area_count + parity_count;
