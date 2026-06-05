@@ -733,7 +733,9 @@ int check_lv_segments_incomplete_vg(struct logical_volume *lv)
 			inc_error_count;
 		}
 
-		data_rimage_count = seg->area_count - seg->segtype->parity_devs;
+		/* raidkm (md level 71): m is variable, carried in seg->parity_count */
+		data_rimage_count = seg->area_count -
+			(seg_is_any_raidkm(seg) ? seg->parity_count : seg->segtype->parity_devs);
 		/* FIXME: raid varies seg->area_len? */
 		if (seg->len != seg->area_len &&
 		    seg->len != seg->area_len * data_rimage_count) {

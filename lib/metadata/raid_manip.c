@@ -1112,7 +1112,7 @@ static int _alloc_image_components(struct logical_volume *lv,
 
 	/* Do we need to allocate any extents? */
 	if (pvs && !dm_list_empty(pvs) &&
-	    !(ah = allocate_extents(lv->vg, NULL, segtype, 0, count, count,
+	    !(ah = allocate_extents(lv->vg, NULL, segtype, 0, 0, count, count,
 				    region_size, extents, pvs,
 				    lv->alloc, 0, parallel_areas)))
 		return_0;
@@ -1593,6 +1593,7 @@ static int _lv_alloc_reshape_space(struct logical_volume *lv,
 
 		if (!lv_extend(lv, segtype, data_rimages, stripe_size,
 			       mirrors, /* seg_is_any_raid10(seg) ? seg->data_copies : mirrors, */
+			       0, /* raidkm parity_count: reshape path, not raidkm */
 			       seg->region_size, reshape_len /* # of reshape LEs to add */,
 			       allocate_pvs, lv->alloc, 0)) {
 			log_error("Failed to allocate out-of-place reshape space for %s.",
@@ -2607,7 +2608,7 @@ static int _alloc_rmeta_for_lv(struct logical_volume *data_lv,
 	if (!(base_name = top_level_lv_name(data_lv->vg, data_lv->name)))
 		return_0;
 
-	if (!(ah = allocate_extents(data_lv->vg, NULL, seg->segtype, 0, 1, 0,
+	if (!(ah = allocate_extents(data_lv->vg, NULL, seg->segtype, 0, 0, 1, 0,
 				    seg->region_size,
 				    raid_rmeta_extents_delta(data_lv->vg->cmd, 0, data_lv->le_count,
 							     seg->region_size, data_lv->vg->extent_size),

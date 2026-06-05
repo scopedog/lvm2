@@ -1124,6 +1124,10 @@ static uint32_t _raid_stripes_count(struct lv_segment *seg)
 	if (seg_is_raid10(seg))
 		return seg->area_count / _raid_data_copies(seg);
 
+	/* raidkm (md level 71): m is variable, carried in seg->parity_count */
+	if (seg_is_any_raidkm(seg))
+		return seg->area_count - seg->parity_count;
+
 	return seg->area_count - seg->segtype->parity_devs;
 }
 
@@ -3590,6 +3594,7 @@ static struct alloc_handle *_alloc_init(struct cmd_context *cmd,
 					uint32_t new_extents,
 					uint32_t mirrors,
 					uint32_t stripes,
+					uint32_t raidkm_parity, /* raidkm: m (else 0 -> use segtype) */
 					uint32_t metadata_area_count,
 					uint32_t extent_size,
 					uint32_t region_size,
@@ -3636,7 +3641,12 @@ static struct alloc_handle *_alloc_init(struct cmd_context *cmd,
 	 * account for the extra parity devices because the array already
 	 * exists and they only want replacement drives.
 	 */
-	parity_count = (area_count <= segtype->parity_devs) ? 0 : segtype->parity_devs;
+	/* raidkm (md level 71): parity count m is variable, passed in explicitly
+	 * (segtype->parity_devs is 0); otherwise use the per-segtype constant. */
+	if (segtype_is_any_raidkm(segtype))
+		parity_count = (area_count <= raidkm_parity) ? 0 : raidkm_parity;
+	else
+		parity_count = (area_count <= segtype->parity_devs) ? 0 : segtype->parity_devs;
 	alloc_count = area_count + parity_count;
 	if (segtype_is_raid(segtype) && metadata_area_count)
 		/* RAID has a meta area for each device */
@@ -3777,6 +3787,7 @@ struct alloc_handle *allocate_extents(struct volume_group *vg,
 				      struct logical_volume *lv,
 				      const struct segment_type *segtype,
 				      uint32_t stripes,
+				      uint32_t parity_count, /* raidkm: m, else 0 */
 				      uint32_t mirrors, uint32_t log_count,
 				      uint32_t region_size, uint32_t extents,
 				      struct dm_list *allocatable_pvs,
@@ -3809,7 +3820,8 @@ struct alloc_handle *allocate_extents(struct volume_group *vg,
 		alloc = vg->alloc;
 
 	if (!(ah = _alloc_init(vg->cmd, segtype, alloc, approx_alloc,
-			       lv ? lv->le_count : 0, extents, mirrors, stripes, log_count,
+			       lv ? lv->le_count : 0, extents, mirrors, stripes,
+			       parity_count, log_count,
 			       vg->extent_size, region_size,
 			       parallel_areas)))
 		return_NULL;
@@ -4501,7 +4513,7 @@ static int _lv_raid_redundant_allocation(struct logical_volume *lv, struct dm_li
 int lv_extend(struct logical_volume *lv,
 	      const struct segment_type *segtype,
 	      uint32_t stripes, uint32_t stripe_size,
-	      uint32_t mirrors, uint32_t region_size,
+	      uint32_t mirrors, uint32_t parity_count, uint32_t region_size,
 	      uint32_t extents,
 	      struct dm_list *allocatable_pvs, alloc_policy_t alloc,
 	      int approx_alloc)
@@ -4550,7 +4562,7 @@ int lv_extend(struct logical_volume *lv,
 
 	}
 
-	if (!(ah = allocate_extents(lv->vg, lv, segtype, stripes, mirrors,
+	if (!(ah = allocate_extents(lv->vg, lv, segtype, stripes, parity_count, mirrors,
 				    log_count, region_size, extents,
 				    allocatable_pvs, alloc, approx_alloc, NULL)))
 		return_0;
@@ -4573,7 +4585,10 @@ int lv_extend(struct logical_volume *lv,
 		 * the mirror legs are AREA_LV while the stripes underneath
 		 * are AREA_PV.
 		 */
-		if (segtype_is_raid(segtype))
+		if (segtype_is_any_raidkm(segtype))
+			/* raidkm: m parity devices (variable, passed in) */
+			sub_lv_count = mirrors * stripes + parity_count;
+		else if (segtype_is_raid(segtype))
 			sub_lv_count = mirrors * stripes + segtype->parity_devs;
 		else
 			sub_lv_count = mirrors;
@@ -4586,6 +4601,12 @@ int lv_extend(struct logical_volume *lv,
 			log_error("Failed to insert layer for %s", lv->name);
 			goto out;
 		}
+
+		/* raidkm: record m on the freshly created top segment so the
+		 * table line and size helpers see it (only on initial create;
+		 * an extend of an existing raidkm LV keeps the imported value). */
+		if (segtype_is_any_raidkm(segtype) && parity_count)
+			first_seg(lv)->parity_count = parity_count;
 
 		if (!(r = _lv_extend_layered_lv(ah, lv, new_extents - lv->le_count, 0,
 						mirrors, stripes, stripe_size)))
@@ -5922,7 +5943,10 @@ static int _lv_resize_volume(struct logical_volume *lv,
 	} else if ((lp->extents > lv->le_count) && /* Ensure we extend */
 		   !lv_extend(lv, lp->segtype,
 			      lp->stripes, lp->stripe_size,
-			      lp->mirrors, first_seg(lv)->region_size,
+			      lp->mirrors,
+			      /* raidkm resize keeps geometry: reuse existing m */
+			      seg_is_any_raidkm(first_seg(lv)) ? first_seg(lv)->parity_count : 0,
+			      first_seg(lv)->region_size,
 			      lp->extents - lv->le_count,
 			      pvh, alloc, lp->approx_alloc))
 		return_0;
@@ -8990,7 +9014,7 @@ static struct logical_volume *_create_virtual_origin(struct cmd_context *cmd,
 				   ALLOC_INHERIT, vg)))
 		return_NULL;
 
-	if (!lv_extend(lv, segtype, 1, 0, 1, 0, voriginextents,
+	if (!lv_extend(lv, segtype, 1, 0, 1, 0, 0, voriginextents,
 		       NULL, ALLOC_INHERIT, 0))
 		return_NULL;
 
@@ -9475,7 +9499,7 @@ static struct logical_volume *_lv_create_an_lv(struct volume_group *vg,
 
 	if (!lv_extend(lv, create_segtype,
 		       lp->stripes, lp->stripe_size,
-		       lp->mirrors,
+		       lp->mirrors, lp->parity_count,
 		       segtype_is_pool(create_segtype) ? lp->pool_metadata_extents : lp->region_size,
 		       (segtype_is_thin_volume(create_segtype) ||
 			segtype_is_vdo(create_segtype)) ? lp->virtual_extents : lp->extents,

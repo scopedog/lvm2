@@ -1491,7 +1491,7 @@ static int _add_mirrors_that_preserve_segments(struct logical_volume *lv,
 								vg_is_clustered(lv->vg))))
 		return_0;
 
-	if (!(ah = allocate_extents(lv->vg, NULL, segtype, 1, mirrors, 0, 0,
+	if (!(ah = allocate_extents(lv->vg, NULL, segtype, 1, 0, mirrors, 0, 0,
 				    lv->le_count, allocatable_pvs, alloc, 0,
 				    parallel_areas))) {
 		log_error("Unable to allocate mirror extents for %s.",
@@ -1742,7 +1742,7 @@ struct logical_volume *prepare_mirror_log(struct logical_volume *lv,
 
 	/* Allocate destination extents */
 	if (!(ah = allocate_extents(lv->vg, NULL, segtype,
-				    0, 0, 1, region_size,
+				    0, 0, 0, 1, region_size,
 				    lv->le_count, allocatable_pvs,
 				    alloc, 0, parallel_areas))) {
 		log_error("Unable to allocate extents for mirror log.");
@@ -1816,7 +1816,7 @@ int add_mirror_log(struct cmd_context *cmd, struct logical_volume *lv,
 
 	/* allocate destination extents */
 	if (!(ah = allocate_extents(lv->vg, NULL, segtype,
-				    0, 0, log_count - old_log_count, region_size,
+				    0, 0, 0, log_count - old_log_count, region_size,
 				    lv->le_count, allocatable_pvs,
 				    alloc, 0, parallel_areas))) {
 		log_error("Unable to allocate extents for mirror log.");
@@ -1880,7 +1880,7 @@ int add_mirror_images(struct cmd_context *cmd, struct logical_volume *lv,
 		return_0;
 
 	if (!(ah = allocate_extents(lv->vg, NULL, segtype,
-				    stripes, mirrors, log_count, region_size, lv->le_count,
+				    stripes, 0, mirrors, log_count, region_size, lv->le_count,
 				    allocatable_pvs, alloc, 0, parallel_areas))) {
 		log_error("Unable to allocate extents for mirror(s).");
 		return 0;

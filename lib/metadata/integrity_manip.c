@@ -228,7 +228,7 @@ int lv_extend_integrity_in_raid(struct logical_volume *lv, struct dm_list *pvh)
 
 		use_pvh = &allocatable_pvs;
 
-		if (!lv_extend(lv_imeta, segtype, 1, 0, 0, 0,
+		if (!lv_extend(lv_imeta, segtype, 1, 0, 0, 0, 0,
 			       meta_extents - prev_meta_extents,
 			       use_pvh, lv_imeta->alloc, 0)) {
 			log_error("Failed to extend integrity metadata LV %s", lv_imeta->name);
