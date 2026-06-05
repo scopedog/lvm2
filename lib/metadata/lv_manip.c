@@ -2251,7 +2251,11 @@ static int _for_each_pv(struct cmd_context *cmd, struct logical_volume *lv,
 	if (max_seg_len && *max_seg_len > remaining_seg_len)
 		*max_seg_len = remaining_seg_len;
 
-	area_multiple = _calc_area_multiple(seg->segtype, seg->area_count, 0);
+	/* raidkm (md level 71): segtype->parity_devs is 0, so pass the data-image
+	 * count (k = area_count - m) as 'stripes' for a correct area_multiple
+	 * (needed by any allocation that walks parallel areas, e.g. repair). */
+	area_multiple = _calc_area_multiple(seg->segtype, seg->area_count,
+					    seg_is_any_raidkm(seg) ? seg->area_count - seg->parity_count : 0);
 	area_len = (remaining_seg_len / area_multiple) ? : 1;
 
 	/* For striped mirrors, all the areas are counted, through the mirror layer */

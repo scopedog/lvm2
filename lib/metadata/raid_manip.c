@@ -1234,13 +1234,23 @@ uint32_t lv_raid_data_copies(const struct segment_type *segtype, uint32_t area_c
 }
 
 
+/*
+ * Parity device count of @seg.  raidkm (md level 71) carries a variable parity
+ * count m per-LV in seg->parity_count (segtype->parity_devs is 0); raid4/5/6
+ * use the per-segtype constant.
+ */
+static uint32_t _raid_parity_devs(const struct lv_segment *seg)
+{
+	return seg_is_any_raidkm(seg) ? seg->parity_count : seg->segtype->parity_devs;
+}
+
 /* Return data images count for @total_rimages depending on @seg's type */
 static uint32_t _data_rimages_count(const struct lv_segment *seg, const uint32_t total_rimages)
 {
-	if (!seg_is_thin(seg) && total_rimages <= seg->segtype->parity_devs)
+	if (!seg_is_thin(seg) && total_rimages <= _raid_parity_devs(seg))
 		return_0;
 
-	return total_rimages - seg->segtype->parity_devs;
+	return total_rimages - _raid_parity_devs(seg);
 }
 
 /* Get total area len of @lv, i.e. sum of area_len of all segments */
@@ -6933,10 +6943,10 @@ static int _lv_raid_rebuild_or_replace(struct logical_volume *lv,
 		return 0;
 	}
 
-	if (raid_seg->segtype->parity_devs &&
-	    (match_count > raid_seg->segtype->parity_devs)) {
+	if (_raid_parity_devs(raid_seg) &&
+	    (match_count > _raid_parity_devs(raid_seg))) {
 		log_error("Unable to %s more than %u PVs from (%s) %s.",
-			  action_str, raid_seg->segtype->parity_devs,
+			  action_str, _raid_parity_devs(raid_seg),
 			  lvseg_name(raid_seg), display_lvname(lv));
 		return 0;
 	}
@@ -7366,10 +7376,10 @@ static int _partial_raid_lv_is_redundant(const struct logical_volume *lv)
 		return 0;	/* Insufficient redundancy to activate */
 	}
 
-	if (raid_seg->segtype->parity_devs &&
-	    (failed_components > raid_seg->segtype->parity_devs)) {
+	if (_raid_parity_devs(raid_seg) &&
+	    (failed_components > _raid_parity_devs(raid_seg))) {
 		log_verbose("More than %u components from %s %s have failed.",
-			    raid_seg->segtype->parity_devs,
+			    _raid_parity_devs(raid_seg),
 			    lvseg_name(raid_seg),
 			    display_lvname(lv));
 		return 0;	/* Insufficient redundancy to activate */
