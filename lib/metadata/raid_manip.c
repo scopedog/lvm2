@@ -2566,6 +2566,17 @@ static int _raid_reshape(struct logical_volume *lv,
 
 	seg->region_size = new_region_size;
 
+	/*
+	 * raidkm: area_multiple is 1 (m is per-LV, segtype->parity_devs == 0),
+	 * so the invariant is seg->area_len == seg->len.  The generic resize
+	 * helpers above maintain the raid456 relation instead (area_len = the
+	 * constant per-image length), which leaves a stale area_len behind a
+	 * len change and trips metadata validation ("inconsistent area_len")
+	 * on the commit below.  Re-establish the raidkm invariant once here.
+	 */
+	if (seg_is_any_raidkm(seg))
+		seg->area_len = seg->len;
+
 	if (seg->area_count != 2 || old_image_count != seg->area_count) {
 		if (!_lv_update_reload_fns_reset_eliminate_lvs(lv, 0, &removal_lvs, NULL))
 			return_0;
