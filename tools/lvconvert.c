@@ -1469,7 +1469,8 @@ static int _lvconvert_raid(struct logical_volume *lv, struct lvconvert_params *l
 
 		if (!lv_raid_convert(lv, lp->segtype,
 				     lp->yes, lp->force, lp->stripes, lp->stripe_size_supplied, lp->stripe_size,
-				     lp->region_size, lp->pvh))
+				     lp->region_size,
+				     arg_uint_value(cmd, paritycount_ARG, 0), lp->pvh))
 			return_0;
 
 		log_print_unless_silent("Logical volume %s successfully converted.",
@@ -1496,7 +1497,8 @@ try_new_takeover_or_reshape:
 	if (!lv_raid_convert(lv, lp->segtype,
 			     lp->yes, lp->force, lp->stripes, lp->stripe_size_supplied, lp->stripe_size,
 			     (lp->region_size_supplied || !seg->region_size) ?
-			     lp->region_size : seg->region_size , lp->pvh))
+			     lp->region_size : seg->region_size,
+			     arg_uint_value(cmd, paritycount_ARG, 0), lp->pvh))
 		return_0;
 
 	log_print_unless_silent("Logical volume %s successfully converted.",

@@ -44,6 +44,13 @@ static int _check_restriping(uint32_t new_stripes, struct logical_volume *lv)
 /*
  * Check if reshape is supported in the kernel.
  */
+/* Parity device count of @seg: raidkm carries it per-LV (seg->parity_count,
+ * variable m), not per-segtype (segtype->parity_devs == 0 for raidkm). */
+static uint32_t _seg_parity_devs(const struct lv_segment *seg)
+{
+	return seg_is_any_raidkm(seg) ? seg->parity_count : seg->segtype->parity_devs;
+}
+
 static int _reshape_is_supported(struct cmd_context *cmd, const struct segment_type *segtype)
 {
 	unsigned attrs = 0;
@@ -1556,6 +1563,17 @@ static int _lv_alloc_reshape_space(struct logical_volume *lv,
 	 */
 	if (_reshape_len_per_dev(seg)) {
 		if (out_of_place_les_per_disk > _reshape_len_per_dev(seg)) {
+			/*
+			 * raidkm: the existing space below data_offset is the
+			 * permanent COW scratch zone and may never move (the
+			 * kernel pins data_offset) — and since the required
+			 * size is constant per LV this cannot happen anyway.
+			 */
+			if (seg_is_any_raidkm(seg) && data_offset) {
+				log_error("Cannot grow the permanent raidkm reshape space of %s.",
+					  display_lvname(lv));
+				return 0;
+			}
 			/* Kernel says data is at data_offset > 0 -> relocate reshape space at the begin to the end */
 			if (data_offset && !_lv_relocate_reshape_space(lv, alloc_end))
 				return_0;
@@ -1603,7 +1621,8 @@ static int _lv_alloc_reshape_space(struct logical_volume *lv,
 
 		if (!lv_extend(lv, segtype, data_rimages, stripe_size,
 			       mirrors, /* seg_is_any_raid10(seg) ? seg->data_copies : mirrors, */
-			       0, /* raidkm parity_count: reshape path, not raidkm */
+			       /* raidkm: extend the m parity images too */
+			       seg_is_any_raidkm(seg) ? seg->parity_count : 0,
 			       seg->region_size, reshape_len /* # of reshape LEs to add */,
 			       allocate_pvs, lv->alloc, 0)) {
 			log_error("Failed to allocate out-of-place reshape space for %s.",
@@ -1672,6 +1691,17 @@ static int _lv_free_reshape_space_with_status(struct logical_volume *lv, enum al
 	struct lv_segment *seg = first_seg(lv);
 
 	if ((total_reshape_len = _reshape_len_per_lv(lv))) {
+		/*
+		 * raidkm: the space below the constant data_offset is the
+		 * permanent COW reshape scratch/journal zone; freeing it
+		 * would relocate the data inside the images while the kernel
+		 * pins data_offset for the array's lifetime.
+		 */
+		if (seg_is_any_raidkm(seg)) {
+			log_error("Reshape space of raidkm LV %s is the permanent COW scratch zone and cannot be freed.",
+				  display_lvname(lv));
+			return 0;
+		}
 		/*
 		 * raid10:
 		 *
@@ -1848,9 +1878,14 @@ static int _raid_reshape_add_images(struct logical_volume *lv,
 				    const struct segment_type *new_segtype, int yes,
 				    uint32_t old_image_count, uint32_t new_image_count,
 				    const unsigned new_stripes, const unsigned new_stripe_size,
+				    const uint32_t new_parity_count,
 				    struct dm_list *allocate_pvs)
 {
 	uint32_t grown_le_count, current_le_count, s;
+	/* raidkm add-parity: the added image is a parity device — capacity,
+	 * data stripe count and LV size are all unchanged */
+	int parity_add = seg_is_any_raidkm(first_seg(lv)) && new_parity_count &&
+			 new_parity_count != first_seg(lv)->parity_count;
 	struct volume_group *vg;
 	struct logical_volume *slv;
 	struct lv_segment *seg = first_seg(lv);
@@ -1872,26 +1907,39 @@ static int _raid_reshape_add_images(struct logical_volume *lv,
 		log_print_unless_silent("Ignoring layout change on device adding reshape.");
 
 	if (seg_is_any_raid10(seg) && (new_image_count % seg->data_copies)) {
-		log_error("Can't reshape %s LV %s to odd number of stripes.", 
+		log_error("Can't reshape %s LV %s to odd number of stripes.",
 			  lvseg_name(seg), display_lvname(lv));
 		return 0;
 	}
 
-	if (!_lv_reshape_get_new_len(lv, old_image_count, new_image_count, &grown_le_count))
-		return_0;
+	if (parity_add) {
+		log_print_unless_silent("Adding a parity image to %s LV %s (parity count %" PRIu32 " -> %" PRIu32 "); capacity is unchanged.",
+					lvseg_name(seg), display_lvname(lv),
+					seg->parity_count, new_parity_count);
+		if (!yes && yes_no_prompt("Are you sure you want to add %u parity image%s to %s LV %s? [y/n]: ",
+					  new_image_count - old_image_count,
+					  new_image_count - old_image_count > 1 ? "s" : "",
+					  lvseg_name(seg), display_lvname(lv)) == 'n') {
+			log_error("Logical volume %s NOT converted.", display_lvname(lv));
+			return 0;
+		}
+	} else {
+		if (!_lv_reshape_get_new_len(lv, old_image_count, new_image_count, &grown_le_count))
+			return_0;
 
-	current_le_count = lv->le_count - _reshape_len_per_lv(lv);
-	grown_le_count -= _reshape_len_per_dev(seg) * _data_rimages_count(seg, new_image_count);
-	log_warn("WARNING: Adding stripes to active%s logical volume %s "
-		 "will grow it from %u to %u extents!",
-		 info.open_count ? " and open" : "",
-		 display_lvname(lv), current_le_count, grown_le_count);
-	log_print_unless_silent("Run \"lvresize -l%u %s\" to shrink it or use the additional capacity.",
-				current_le_count, display_lvname(lv));
-	if (!yes && yes_no_prompt("Are you sure you want to add %u images to %s LV %s? [y/n]: ",
-				  new_image_count - old_image_count, lvseg_name(seg), display_lvname(lv)) == 'n') {
-		log_error("Logical volume %s NOT converted.", display_lvname(lv));
-		return 0;
+		current_le_count = lv->le_count - _reshape_len_per_lv(lv);
+		grown_le_count -= _reshape_len_per_dev(seg) * _data_rimages_count(seg, new_image_count);
+		log_warn("WARNING: Adding stripes to active%s logical volume %s "
+			 "will grow it from %u to %u extents!",
+			 info.open_count ? " and open" : "",
+			 display_lvname(lv), current_le_count, grown_le_count);
+		log_print_unless_silent("Run \"lvresize -l%u %s\" to shrink it or use the additional capacity.",
+					current_le_count, display_lvname(lv));
+		if (!yes && yes_no_prompt("Are you sure you want to add %u images to %s LV %s? [y/n]: ",
+					  new_image_count - old_image_count, lvseg_name(seg), display_lvname(lv)) == 'n') {
+			log_error("Logical volume %s NOT converted.", display_lvname(lv));
+			return 0;
+		}
 	}
 
 	/* raid10 new image allocation can't cope with allocated reshape space. */
@@ -1905,11 +1953,25 @@ static int _raid_reshape_add_images(struct logical_volume *lv,
 	if (!_lv_raid_change_image_count(lv, 1, new_image_count, allocate_pvs, NULL, 0, 0))
 		return_0;
 
-	/* Reshape adding image component pairs -> change sizes/counters accordingly */
-	if (!_reshape_adjust_to_size(lv, old_image_count, new_image_count)) {
+	/* Reshape adding image component pairs -> change sizes/counters accordingly
+	 * (not for add-parity: data stripe count and LV size are unchanged) */
+	if (!parity_add &&
+	    !_reshape_adjust_to_size(lv, old_image_count, new_image_count)) {
 		log_error("Failed to adjust LV %s to new size!", display_lvname(lv));
 		return 0;
 	}
+
+	/*
+	 * Add-parity: now that the new image pair exists (allocated with the
+	 * OLD parity count so the per-image extent math matched the existing
+	 * images), bump m.  From here on data-stripe accounting
+	 * (_data_rimages_count) stays k, and the reshape activation's table
+	 * line carries parity_count m+1 together with the new image's
+	 * delta_disks flag — the combination the kernel validates as the
+	 * add-parity step.
+	 */
+	if (parity_add)
+		seg->parity_count = new_parity_count;
 
 	/*
 	 * https://bugzilla.redhat.com/1447812
@@ -2317,6 +2379,7 @@ static int _raid_reshape(struct logical_volume *lv,
 			 const unsigned new_region_size,
 			 const unsigned new_stripes,
 			 const unsigned new_stripe_size,
+			 const uint32_t new_parity_count,
 			 struct dm_list *allocate_pvs)
 {
 	int force_repair = 0, r, too_few = 0;
@@ -2335,7 +2398,10 @@ static int _raid_reshape(struct logical_volume *lv,
 	if (!(old_image_count = seg->area_count))
 		return_0;
 
-	if ((new_image_count = new_stripes + seg->segtype->parity_devs) < 2)
+	/* raidkm: m is per-LV; an add-parity request supplies new_parity_count == m+1 */
+	if ((new_image_count = new_stripes +
+	     (seg_is_any_raidkm(seg) ? (new_parity_count ? : seg->parity_count)
+				     : seg->segtype->parity_devs)) < 2)
 		return_0;
 
 	/* FIXME Can't reshape volume in use - aka not toplevel devices */
@@ -2380,7 +2446,18 @@ static int _raid_reshape(struct logical_volume *lv,
 		/*
 		 * No change in segment type, image count, region or stripe size has been requested ->
 		 * user requests this to remove any reshape space from the @lv
+		 *
+		 * raidkm: the space below the constant data_offset is the
+		 * permanent COW reshape scratch/journal zone — it can never
+		 * be freed (freeing would relocate the data inside the
+		 * images, and the kernel pins data_offset for the array's
+		 * lifetime).
 		 */
+		if (seg_is_any_raidkm(seg)) {
+			log_error("Reshape space of raidkm LV %s is the permanent COW scratch zone and cannot be freed.",
+				  display_lvname(lv));
+			return 0;
+		}
 		if (!_lv_free_reshape_space_with_status(lv, &where_it_was)) {
 			log_error(INTERNAL_ERROR "Failed to free reshape space of %s.",
 				  display_lvname(lv));
@@ -2402,7 +2479,8 @@ static int _raid_reshape(struct logical_volume *lv,
 	}
 
 	/* raid4/5 with N image component pairs (i.e. N-1 stripes): allow for raid4/5 reshape to 2 devices, i.e. raid1 layout */
-	if (seg_is_raid4(seg) || seg_is_any_raid5(seg)) {
+	if (seg_is_raid4(seg) || seg_is_any_raid5(seg) ||
+	    seg_is_any_raidkm(seg)) {	/* raidkm allows k >= 1 (even k <= m) */
 		if (new_stripes < 1)
 			too_few = 1;
 
@@ -2457,11 +2535,18 @@ static int _raid_reshape(struct logical_volume *lv,
 	if (old_image_count < new_image_count) {
 		if (!_raid_reshape_add_images(lv, new_segtype, yes,
 					      old_image_count, new_image_count,
-					      new_stripes, new_stripe_size, allocate_pvs))
+					      new_stripes, new_stripe_size,
+					      new_parity_count, allocate_pvs))
 			return_0;
 
 	/* Handle disk removal reshaping */
 	} else if (old_image_count > new_image_count) {
+		/* raidkm data-disk shrink is unimplemented in the kernel personality */
+		if (seg_is_any_raidkm(seg)) {
+			log_error("Removing stripes from raidkm LV %s is not supported.",
+				  display_lvname(lv));
+			return 0;
+		}
 		if (!_raid_reshape_remove_images(lv, new_segtype, yes, force,
 						 old_image_count, new_image_count,
 						 new_stripes, new_stripe_size,
@@ -2513,7 +2598,8 @@ static int _raid_reshape(struct logical_volume *lv,
  */
 static int _reshape_requested(const struct logical_volume *lv, const struct segment_type *segtype,
 			      const uint32_t data_copies, const uint32_t region_size,
-			      const uint32_t stripes, const uint32_t stripe_size)
+			      const uint32_t stripes, const uint32_t stripe_size,
+			      const uint32_t new_parity_count)
 {
 	struct lv_segment *seg = first_seg(lv);
 
@@ -2527,6 +2613,31 @@ static int _reshape_requested(const struct logical_volume *lv, const struct segm
 	/* Switching raid levels is a takeover, no reshape */
 	if (!_is_same_level(seg->segtype, segtype))
 		return 0;
+
+	/*
+	 * raidkm add-parity (m -> m+1): a reshape adding one parity image at
+	 * unchanged capacity.  The kernel supports exactly one step at a time
+	 * and no parity removal; a simultaneous stripe change is rejected.
+	 */
+	if (new_parity_count) {
+		if (!seg_is_any_raidkm(seg)) {
+			log_error("--paritycount is only applicable to raidkm LVs.");
+			return 2;
+		}
+		if (new_parity_count == seg->parity_count)
+			return 0;
+		if (new_parity_count != seg->parity_count + 1) {
+			log_error("raidkm parity count of %s can only grow by one per conversion (%" PRIu32 " -> %" PRIu32 ").",
+				  display_lvname(lv), seg->parity_count, seg->parity_count + 1);
+			return 2;
+		}
+		if (stripes != _data_rimages_count(seg, seg->area_count)) {
+			log_error("Cannot change stripes and parity count of %s at once.",
+				  display_lvname(lv));
+			return 2;
+		}
+		return 1;
+	}
 
 	/* Possible takeover in case #data_copies == #stripes */
 	if (seg_is_raid10_near(seg) && segtype_is_raid1(segtype))
@@ -4627,6 +4738,21 @@ static const struct possible_takeover_reshape_type _possible_takeover_reshape_ty
 	  .current_areas = ~0U,
 	  .options = ALLOW_REGION_SIZE|ALLOW_STRIPES|ALLOW_STRIPE_SIZE },
 
+	/*
+	 * Reshape raidkm <-> raidkm (same placement only; the COW-staged kernel
+	 * reshape supports data-disk grow and parity-count grow, no chunk-size
+	 * change — hence no ALLOW_STRIPE_SIZE).
+	 */
+	{ .current_types  = SEG_RAIDKM,
+	  .possible_types = SEG_RAIDKM,
+	  .current_areas = ~0U,
+	  .options = ALLOW_REGION_SIZE|ALLOW_STRIPES },
+
+	{ .current_types  = SEG_RAIDKM_N,
+	  .possible_types = SEG_RAIDKM_N,
+	  .current_areas = ~0U,
+	  .options = ALLOW_REGION_SIZE|ALLOW_STRIPES },
+
 	/* raid5_ls <-> raid6_ls_6 */
 	{ .current_types  = SEG_RAID5_LS|SEG_RAID6_LS_6,
 	  .possible_types = SEG_RAID5_LS|SEG_RAID6_LS_6,
@@ -6552,6 +6678,7 @@ int lv_raid_convert(struct logical_volume *lv,
 		    const unsigned new_stripe_size_supplied,
 		    const unsigned new_stripe_size,
 		    const uint32_t new_region_size,
+		    const uint32_t new_parity_count,
 		    struct dm_list *allocate_pvs)
 {
 	struct lv_segment *seg = first_seg(lv);
@@ -6614,13 +6741,13 @@ int lv_raid_convert(struct logical_volume *lv,
 	/*
 	 * reshape of capable raid type requested
 	 */
-	switch (_reshape_requested(lv, new_segtype, data_copies, region_size, stripes, stripe_size)) {
+	switch (_reshape_requested(lv, new_segtype, data_copies, region_size, stripes, stripe_size, new_parity_count)) {
 	case 0:
 		break;
 	case 1:
 		if (!_raid_reshape(lv, new_segtype, yes, force,
 				   data_copies, region_size,
-				   stripes, stripe_size, allocate_pvs)) {
+				   stripes, stripe_size, new_parity_count, allocate_pvs)) {
 			log_error("Reshape request failed on LV %s.", display_lvname(lv));
 			return 0;
 		}

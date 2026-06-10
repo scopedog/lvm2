@@ -320,7 +320,9 @@ typedef enum {
 /* Return length of segment depending on type and reshape_len */
 static uint32_t _seg_len(const struct lv_segment *seg)
 {
-	uint32_t reshape_len = seg_is_raid(seg) ? ((seg->area_count - seg->segtype->parity_devs) * seg->reshape_len) : 0;
+	/* raidkm carries its parity count per-LV (segtype->parity_devs == 0) */
+	uint32_t parity_devs = seg_is_any_raidkm(seg) ? seg->parity_count : seg->segtype->parity_devs;
+	uint32_t reshape_len = seg_is_raid(seg) ? ((seg->area_count - parity_devs) * seg->reshape_len) : 0;
 
 	return seg->len - reshape_len;
 }

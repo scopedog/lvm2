@@ -415,6 +415,14 @@ DESC: Convert raid LV to change the stripe size.
 RULE: all not lv_is_locked lv_is_pvmove lv_is_raid_with_integrity
 RULE: all not LV_raid0 LV_raid1
 
+lvconvert --paritycount Number LV_raid
+OO: OO_LVCONVERT, --interval Number, --regionsize RegionSize
+OP: PV ...
+ID: lvconvert_raid_types
+DESC: Convert raidkm LV to grow the parity count (add a parity image).
+RULE: all not lv_is_locked lv_is_pvmove lv_is_raid_with_integrity
+RULE: all not LV_raid0 LV_raid1
+
 lvconvert --regionsize RegionSize LV_raid
 OO: OO_LVCONVERT
 ID: lvconvert_change_region_size
